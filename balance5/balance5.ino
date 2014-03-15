@@ -30,6 +30,13 @@ THE SOFTWARE.
 #include "I2Cdev.h"
 #include "MPU6050.h"
 #include "TimerOne.h"
+#include "HMC5883L.h"
+
+// class default I2C address is 0x1E
+// specific I2C addresses may be passed as a parameter here
+// this device only supports one I2C address (0x1E)
+HMC5883L mag;
+int16_t mx, my, mz;
 
 // class default I2C address is 0x68
 // specific I2C addresses may be passed as a parameter here
@@ -48,6 +55,9 @@ MPU6050 Gyro6050;
 #define CMD_KI_D            54 //'6'
 #define CMD_KSP_U           55 //'7'
 #define CMD_KSP_D           56 //'8'
+#define CMD_KPN_U           57 //'9'
+#define CMD_KPN_D           48 //'0'
+
 
 #define CMD_TASK_TIME_U     114 //'r'
 #define CMD_TASK_TIME_D     116 //'t'
@@ -93,9 +103,9 @@ float Accel_z;          //Z軸加速度值暫存
 float Angle_ax;         //由加速度計算的傾斜角度
 float Angle_ax_1;
 float Angle;            //小車最終傾斜角度
-int value;            //角度正負極性標記
+int value;              //角度正負極性標記
 
-float Accel_x_offset;    //Regis, X軸加速度零點偏移
+float Accel_x_offset;      //Regis, X軸加速度零點偏移
 float Gyro_y_offset;       //Regis, 角速度軸Y零點偏移
 
 //******PWM參數*************
@@ -110,11 +120,12 @@ float   cmd_DZ_L;         //Regis,馬達PWM的死區
 float   cmd_DZ_R;         //Regis,馬達PWM的死區
 
 //******電機參數*************
-float speed_r_l;        //電機轉速
+float speed_r_l;            //電機轉速
 float car_speed;            //電機轉速濾波
 float car_position;         //位移
-float  turn_need;
-float  speed_need;
+float turn_need;
+float speed_need;
+float car_speed_adjust;     //轉速adjust
 int x_dir, y_dir;
 int TN1=7;
 int TN2=8;
@@ -129,7 +140,7 @@ static float Q_angle=0.001;
 static float Q_gyro=0.003;
 static float R_angle=0.5;
 static char  C_0 = 1;
-static float dt= 5;                 //0.01=10ms, dt為kalman濾波器採樣時間;
+static float dt= 5;                  //0.01=10ms, dt為kalman濾波器採樣時間;
 static long task_dt = 0;             //10000=10ms, task_dt為主循環執行時間
 
 static float Q_bias = 0, Angle_err;
@@ -141,8 +152,8 @@ static float PP[2][2] = { { 1, 0 },{ 0, 1 } };
 //******PID 參數************
 static float Kp  = 0;   //PID參數
 static float Kd  = 0;   //PID參數
-static float Ki = 0;  //PID參數
-static float Kpn = 0;  //PID參數
+static float Ki = 0;    //PID參數
+static float Kpn = 0;   //PID參數
 static float Ksp = 0;   //PID參數
 
 // Pin 13 has an LED connected on most Arduino boards.
@@ -162,14 +173,14 @@ void Balance_Car_Init(void)
 {
     //******PID參數************
     //Kp  = 15.0;   //PID參數
-    //Kd  = 3.2;   //PID參數
+    //Kd  = 3.2;    //PID參數
 //para_1
-    Kp  = 7.7;   //PID參數
-    Kd  = 3.8;   //PID參數
+    Kp  = 7.7;     //PID參數
+    Kd  = 3.8;     //PID參數
     Ki  = 0.370;   //PID參數
 //para_2
-    Kp  = 10;   //PID參數
-    Kd  = 25;   //PID參數
+    Kp  = 10;     //PID參數
+    Kd  = 25;     //PID參數
     Ki  = 0.06;   //PID參數
 //para_3
     Kp  = 10.0;   //PID參數
@@ -179,9 +190,12 @@ void Balance_Car_Init(void)
     Kp  = 22.0;   //PID參數
     Kd  = 85.0;   //PID參數
     Ki  = 0.28;   //PID參數
-
-    Kpn = 0.01;  //PID參數
-    Ksp = 3.0;   //PID參數
+//para_5
+    Kp  = 75.0;   //PID參數
+    Kd  = 290.0;   //PID參數
+    Ki  = 0.01;   //PID參數
+    Kpn = 0.05;  //PID參數
+    Ksp = 1.01;   //PID參數
 
     //******卡爾曼參數************
     Q_angle = 0.001;
@@ -191,23 +205,24 @@ void Balance_Car_Init(void)
 
     //*****設定delta, kalman濾波器採樣時間**********
     //dt=0.006;              //0.006=6ms, dt為kalman濾波器採樣時間;
-    dt=0.007;                 //0.01=10ms, dt為kalman濾波器採樣時間;
+    dt=0.007;                //0.01=10ms, dt為kalman濾波器採樣時間;
     //dt=0.05;               //0.05=50ms, dt為kalman濾波器採樣時間;
-    task_dt = 7000;         //us, 1000000=1s, task_dt為主循環執行時間
+    task_dt = 7000;          //us, 1000000=1s, task_dt為主循環執行時間
 
     //******校正Gyro零點偏移量************
-    Accel_x_offset = -1996;    //Regis, X軸加速度零點偏移
-    //Accel_x_offset = -996;    //Regis, X軸加速度零點偏移
+    Accel_x_offset = -393;    //Regis, X軸加速度零點偏移
+    //Accel_x_offset = -996;   //Regis, X軸加速度零點偏移
     
-    Gyro_y_offset = 80;       //Regis, 角速度軸Y零點偏移
+    Gyro_y_offset = 0;        //Regis, 角速度軸Y零點偏移
 
     //******Reset moter counter**********
     speed_mr = 0;	//右電機轉速
     speed_ml = 0;       //左電機轉速
     //******電機參數*************
-    speed_r_l = 0;        //電機轉速
+    speed_r_l = 0;            //電機轉速
     car_speed = 0;            //電機轉速濾波
     car_position = 0;         //位移
+    car_speed_adjust = 0;
     turn_need = 0;
     speed_need = 0;
     dir_control = 0;
@@ -218,9 +233,9 @@ void Balance_Car_Init(void)
     cmd_sw = 0;
 
     //*****PWM**********
-    cmd_DZ_L = 37;
-    cmd_DZ_R = 25;
-    cmd_PWM_step = 26;
+    cmd_DZ_L = 14;
+    cmd_DZ_R = 37;
+    cmd_PWM_step = 0;
 }
 
 void BT_Cmd(void)
@@ -239,7 +254,7 @@ void BT_Cmd(void)
     case CMD_DEBUG:
       cmd_sw_debug += 1;
       //cmd_sw_debug = 1 - cmd_sw_debug;
-      if (cmd_sw_debug > 3)
+      if (cmd_sw_debug > 4)
          cmd_sw_debug = 0;
       Serial.print("Debug=");
       Serial.println(cmd_sw_debug, DEC);     
@@ -257,7 +272,7 @@ void BT_Cmd(void)
     case CMD_ACCEL_X_OFFSET_D:
       Accel_x_offset -= 1.0;
       Serial.print("Accel_x_offset=");
-      Serial.print(Accel_x_offset, DEC);
+      Serial.println(Accel_x_offset, DEC);
       break;
     case CMD_GYRO_Y_OFFSET_U:
       Gyro_y_offset += 1.0;
@@ -304,67 +319,77 @@ void BT_Cmd(void)
       Serial.println(cmd_DZ_R, DEC);
       break;
     case CMD_KP_U:
-      Kp += 0.01;
+      Kp += 0.05;
       Serial.print("Kp=");
       Serial.println(Kp, DEC);
       break;
     case CMD_KP_D:
-      Kp -= 0.01;
+      Kp -= 0.05;
       Serial.print("Kp=");
       Serial.println(Kp, DEC);
       break;
     case CMD_KD_U:
-      Kd += 0.01;
+      Kd += 0.05;
       Serial.print("Kd=");
       Serial.println(Kd, DEC);
       break;
     case CMD_KD_D:
-      Kd -= 0.01;
+      Kd -= 0.05;
       Serial.print("Kd=");
       Serial.println(Kd, DEC);
       break;
     case CMD_KI_U:
-      Ki += 0.001;
+      Ki += 0.005;
       Serial.print("Ki=");
       Serial.println(Ki, DEC);
       break;
     case CMD_KI_D:
-      Ki -= 0.001;
+      Ki -= 0.005;
       Serial.print("Ki=");
       Serial.println(Ki, DEC);
       break;
     case CMD_KSP_U:
-      Ksp += 0.1;
+      Ksp += 0.001;
       Serial.print("Ksp=");
       Serial.println(Ksp, DEC);
       break;
     case CMD_KSP_D:
-      Ksp -= 0.1;
+      Ksp -= 0.001;
       Serial.print("Ksp=");
       Serial.println(Ksp, DEC);
       break;
+    case CMD_KPN_U:
+      Kpn += 0.001;
+      Serial.print("Kpn=");
+      Serial.println(Kpn, DEC);
+      break;
+    case CMD_KPN_D:
+      Kpn -= 0.001;
+      Serial.print("Kpn=");
+      Serial.println(Kpn, DEC);
+      break;
     case CMD_CAR_FF:
-      speed_need = 6 + car_speed;
+      speed_need = 40 + car_speed_adjust;
       dir_control = 0;
       x_dir = 1;
-      Serial.println("FF");
+      Serial.print("FF=");
       Serial.println(speed_need, DEC);
       break;
     case CMD_CAR_BK:
-      speed_need = 6 + car_speed;
+      speed_need = (40 + car_speed_adjust) * -1;
       dir_control = 0;
       x_dir = -1;
-      Serial.println("BK");
+      Serial.print("BK=");
       Serial.println(speed_need, DEC);
       break;
     case CMD_CAR_LEFT:
-      turn_need = 22;
+      turn_need = 110;
       dir_control = 0;
       y_dir = 1;
       Serial.println("L");
       break;
     case CMD_CAR_RIGHT:
-      turn_need = 22;
+      turn_need = 110;
       dir_control = 0;
       y_dir = -1;
       Serial.println("R");
@@ -377,12 +402,12 @@ void BT_Cmd(void)
       Serial.println("STOP");
       break;
     case CMD_CAR_SPEED_U:
-      car_speed += 0.1;
-      Serial.println(car_speed, DEC);
+      car_speed_adjust += 0.1;
+      Serial.println(car_speed_adjust, DEC);
       break;
     case CMD_CAR_SPEED_D:
-      car_speed -= 0.1;
-      Serial.println(car_speed, DEC);
+      car_speed_adjust -= 0.1;
+      Serial.println(car_speed_adjust, DEC);
       break;
     default:
       Serial.println("No Cmd");
@@ -448,18 +473,21 @@ void Angle_Calculate(void)
 	//------加速度--------------------------
 	//範圍為2g時，換算關係：16384 LSB/g
 	//deg = rad*180/3.14
-	Accel_x  = Gyro6050.getAccelerationX();	  //讀取X軸加速度
+        //依照module不同的擺放，要改變對不同軸的取值
+	//Accel_x  = Gyro6050.getAccelerationX();	  //讀取X軸加速度
+	Accel_x  = Gyro6050.getAccelerationY();	          //讀取Y軸加速度
 	//Accel_z  = Gyro6050.getAccelerationZ();	  //讀取Z軸加速度
         //-------角速度-------------------------
 	//範圍為250deg/s時，換算關係：131 LSB/(deg/s)
-	Gyro_y = Gyro6050.getRotationY();	      //靜止時角速度Y軸輸出為+17左右
+	Gyro_y = Gyro6050.getRotationX();	      //靜止時角速度Y軸輸出為+17左右
+	//Gyro_y = Gyro6050.getRotationY();	      //靜止時角速度Y軸輸出為+17左右
         if (cmd_sw_debug == 1)
         {
-            //Serial.print("B1: "); 
+            //Serial.print("B1:\t"); 
             Serial.print(Accel_x, 0);
-            Serial.print(" ");
+            Serial.print("\t");
             Serial.print(Gyro_y,0);
-            Serial.print(" ");
+            Serial.print("\t");
         }
         Angle_ax = (Accel_x + Accel_x_offset) /16384;         //去除零點偏移,計算得到角度（弧度）
         Angle_ax = Angle_ax * 1.3 * RAD_TO_DEG;           //弧度轉換為度,(180/3.14)
@@ -495,11 +523,38 @@ void Angle_Calculate(void)
             //Serial.print(Angle_ax_1,3);
             //Serial.print(" ");
             Serial.print(Angle_ax, 3);
-            Serial.print(" ");
+            Serial.print("\t");
             Serial.print(Angle, 3);
-            Serial.print(" ");
+            Serial.print("\t");
             Serial.println(Gyro_y, 3);
         }
+}
+
+
+//*********************************************************
+//電機編碼器計算
+//*********************************************************
+void Position_Calculate(void)
+{
+  speed_r_l =(speed_mr + speed_ml) * 0.5;
+  car_speed *= 0.7;		                  //車輪速度濾波
+  car_speed += speed_r_l*0.3;
+  car_position += car_speed;	                  //積分得到位移
+  car_position += speed_need;
+  if(car_position < -6000) car_position = -6000;
+  if(car_position > 6000) car_position =  6000;
+  
+  if (cmd_sw_debug == 3)
+  {
+    Serial.print("sp=\t");
+    Serial.print(speed_mr);
+    Serial.print("\t");
+    Serial.println(speed_ml);
+    Serial.print("\t");
+    Serial.println(car_speed);
+    Serial.print("\t");
+    Serial.println(car_position);
+  }
 }
 
 //*********************************************************
@@ -522,30 +577,30 @@ void PWM_Calculate(void)
   關鍵在 0 < Ki < 1 透過遞迴計算 (recursion)，
   Ki 越小，I(t)越快接近零。
   */
-  Et = speed_need * x_dir - Angle;
+  Et = Angle;
   Pt = Kp * Et;
   It = Ki * (It_last + Et);
   Dt = Kd * (Et - Et_last);
   Et_last = Et;
   It_last = It;
   
-  PWM_output  = Pt + It + Dt;          
-  PWM_L = -(PWM_output + turn_need * y_dir);
-  PWM_R = -(PWM_output - turn_need * y_dir);
+  PWM_output  = Pt + It + Dt + Kpn * car_position + Ksp * car_speed;           
+  PWM_L = (PWM_output + turn_need * y_dir);
+  PWM_R = (PWM_output - turn_need * y_dir);
  
   if (cmd_sw_debug == 2)
   {
-    Serial.print(Angle_ax, 3);
-    Serial.print(" ");
-    Serial.print(Angle,3);
-    Serial.print(" ");
-    Serial.print(Pt,3);
-    Serial.print(" ");
-    Serial.print(It,3);
-    Serial.print(" ");
-    Serial.print(Dt,3);
-    Serial.print(" ");
-    Serial.println(PWM_R,3);
+    //Serial.print(Angle_ax, 3);
+    //Serial.print("\t");
+    Serial.print(Angle,1);
+    Serial.print("\t");
+    //Serial.print(Pt,3);
+    //Serial.print("\t");
+    //Serial.print(It,3);
+    //Serial.print("\t");
+    //Serial.print(Dt,3);
+    //Serial.print("\t");
+    Serial.println(PWM_R,1);
   }
 }
 
@@ -586,8 +641,8 @@ void PWM_Output()
     }
     //analogWrite(ENA,min(255,abs(PWM_L) + 25)); //PWM调速a==0-255
     //analogWrite(ENB,min(255,abs(PWM_R) + 25));
-    PWM_L = min(200, (abs(PWM_L) + cmd_DZ_L));
-    PWM_R = min(200, (abs(PWM_R) + cmd_DZ_R));
+    PWM_L = min(255, (abs(PWM_L) + cmd_DZ_L));
+    PWM_R = min(255, (abs(PWM_R) + cmd_DZ_R));
     analogWrite(ENA, PWM_L);
     analogWrite(ENB, PWM_R);
   }
@@ -598,12 +653,32 @@ void PWM_Output()
   }
 }
 
+void Motor_Count_R(void)
+{
+  if (digitalRead(TN3))
+      speed_mr += 1;
+  else
+      speed_mr -= 1;
+}
+
+void Motor_Count_L(void)
+{
+  //blink_led = !blink_led;
+  //digitalWrite(led, blink_led);
+  if (digitalRead(TN1))
+      speed_ml += 1;
+  else
+      speed_ml -= 1;
+}
+
+
 void Timer1_callback(void)
 {
   //blink_led = !blink_led;
   //digitalWrite(led, blink_led);
   timer1_sw++;
 }
+
 void setup() 
 {
   // motor A
@@ -625,15 +700,21 @@ void setup()
   // FS_SEL = MPU6050_GYRO_FS_250 0x0;
   // AFS_SEL = MPU6050_ACCEL_FS_2 0x0;
   Gyro6050.initialize();
+  Serial.println("Initializing HMC5883L with I2C ...");
+  mag.initialize();
+
   Balance_Car_Init();
   // verify connection
   Serial.println("Testing device connections...");
   Serial.println(Gyro6050.testConnection() ? "MPU6050 connection successful" : "MPU6050 connection failed");
+  Serial.println(mag.testConnection() ? "HMC5883L connection successful" : "HMC5883L connection failed");
 
   Serial.println("Initializing car's parameter ...");
   Serial.println("System Ready!");
   Timer1.initialize(task_dt); //1s
   Timer1.attachInterrupt(Timer1_callback);  // attaches callback() as a timer overflow interrupt
+  attachInterrupt(0, Motor_Count_L, RISING); // motor counter
+  attachInterrupt(1, Motor_Count_R, RISING); // motor counter
 }
 
 //unsigned long time;
@@ -643,25 +724,12 @@ void loop() {
   {
     cmd_sw++;
     // for incoming serial data
-    if (cmd_sw > 30)
+    if (cmd_sw > 10)
     {
       cmd_sw = 0;
       if (Serial.available() > 0) 
       {
         BT_Cmd();
-      }
-    }
-    if (speed_need > 0 || turn_need > 0)
-    {
-      dir_control++;
-      if (dir_control > 100)
-      {
-        speed_need -= 0.2;
-        if (speed_need < 0)
-          speed_need = 0;
-        turn_need -= 0.5;
-        if (turn_need < 0)
-          turn_need = 0;
       }
     }
     //time = micros();
@@ -672,7 +740,7 @@ void loop() {
     if (abs(Angle) < 40)
     {
       //time = micros();
-      //Position_Calculate();
+      Position_Calculate();
       //time = micros() - time;
       //Serial.print("Position_Calculate=");
       //Serial.println(time);
@@ -690,6 +758,24 @@ void loop() {
       analogWrite(ENA, 0); 
       analogWrite(ENB, 0);        
     }
+
+    if (cmd_sw_debug == 4)
+    {    
+        // read raw heading measurements from device
+        mag.getHeading(&mx, &my, &mz);
+        // display tab-separated gyro x/y/z values
+        Serial.print("mag:\t");
+        Serial.print(mx); Serial.print("\t");
+        Serial.print(my); Serial.print("\t");
+        Serial.print(mz); Serial.print("\t");
+        // To calculate heading in degrees. 0 degree indicates North
+        float heading = atan2(my, mx);
+        if(heading < 0)
+            heading += 2 * M_PI;
+        Serial.print("heading:\t");
+        Serial.println(heading * 180/M_PI);
+    }
     timer1_sw--;
+    speed_mr = speed_ml = 0;
   }
 }
