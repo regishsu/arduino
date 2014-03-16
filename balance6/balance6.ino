@@ -155,6 +155,7 @@ static float Kd  = 0;   //PID參數
 static float Ki = 0;    //PID參數
 static float Kpn = 0;   //PID參數
 static float Ksp = 0;   //PID參數
+float Pt = 0, Et = 0, Et_last = 0, It = 0, It_last = 0, Dt = 0;
 
 // Pin 13 has an LED connected on most Arduino boards.
 // give it a name:
@@ -172,36 +173,19 @@ int timer1_sw = 0;
 void Balance_Car_Init(void)
 {
     //******PID參數************
-    //Kp  = 15.0;   //PID參數
-    //Kd  = 3.2;    //PID參數
 //para_1
-    Kp  = 7.7;     //PID參數
-    Kd  = 3.8;     //PID參數
-    Ki  = 0.370;   //PID參數
-//para_2
-    Kp  = 10;     //PID參數
-    Kd  = 25;     //PID參數
-    Ki  = 0.06;   //PID參數
-//para_3
     Kp  = 10.0;   //PID參數
-    Kd  = 35.0;   //PID參數
-    Ki  = 0.08;   //PID參數
-//para_4
-    Kp  = 22.0;   //PID參數
-    Kd  = 85.0;   //PID參數
-    Ki  = 0.28;   //PID參數
-//para_5
-    Kp  = 55.0;   //PID參數
-    Kd  = 400.0;   //PID參數
+    Kd  = 0.5;   //PID參數
     Ki  = 0.001;   //PID參數
-    Kpn = 0.05;  //PID參數
-    Ksp = 1.90;   //PID參數
-//para_6
-    Kp  = 30.0;   //PID參數
-    Kd  = 43.0;   //PID參數
+    Kpn = 0.015;  //PID參數
+    Ksp = 1.18;   //PID參數
+    
+//para_2
+    Kp  = 14.0;   //PID參數
+    Kd  = 1.08;   //PID參數
     Ki  = 0.001;   //PID參數
-    Kpn = 0.05;  //PID參數
-    Ksp = 0.80;   //PID參數
+    Kpn = 0.025;  //PID參數
+    Ksp = 2.06;   //PID參數
 
     //******卡爾曼參數************
     Q_angle = 0.001;
@@ -210,16 +194,19 @@ void Balance_Car_Init(void)
     C_0 = 1;
 
     //*****設定delta, kalman濾波器採樣時間**********
-    //dt=0.006;              //0.006=6ms, dt為kalman濾波器採樣時間;
-    dt=0.007;                //0.01=10ms, dt為kalman濾波器採樣時間;
+    dt=0.006;              //0.006=6ms, dt為kalman濾波器採樣時間;
+    //dt=0.007;                //0.01=10ms, dt為kalman濾波器採樣時間;
     //dt=0.05;               //0.05=50ms, dt為kalman濾波器採樣時間;
-    task_dt = 7000;          //us, 1000000=1s, task_dt為主循環執行時間
-
+    //task_dt = 7000;          //us, 1000000=1s, task_dt為主循環執行時間
+    task_dt = 6000;          //us, 1000000=1s, task_dt為主循環執行時間
+    
     //******校正Gyro零點偏移量************
     Accel_x_offset = 40;    //Regis, X軸加速度零點偏移
+    //Accel_x_offset = 0;    //Regis, X軸加速度零點偏移
     //Accel_x_offset = -996;   //Regis, X軸加速度零點偏移
     
     Gyro_y_offset = -340;        //Regis, 角速度軸Y零點偏移
+    //Gyro_y_offset = 0;        //Regis, 角速度軸Y零點偏移
 
     //******Reset moter counter**********
     speed_mr = 0;	//右電機轉速
@@ -238,8 +225,8 @@ void Balance_Car_Init(void)
     cmd_sw = 0;
 
     //*****PWM**********
-    cmd_DZ_L = 14;
-    cmd_DZ_R = 37;
+    cmd_DZ_L = 20;
+    cmd_DZ_R = 48;
     cmd_PWM_step = 0;
 }
 
@@ -324,32 +311,32 @@ void BT_Cmd(void)
       Serial.println(cmd_DZ_R, DEC);
       break;
     case CMD_KP_U:
-      Kp += 0.05;
+      Kp += 0.01;
       Serial.print("Kp=");
       Serial.println(Kp, DEC);
       break;
     case CMD_KP_D:
-      Kp -= 0.05;
+      Kp -= 0.01;
       Serial.print("Kp=");
       Serial.println(Kp, DEC);
       break;
     case CMD_KD_U:
-      Kd += 0.05;
+      Kd += 0.005;
       Serial.print("Kd=");
       Serial.println(Kd, DEC);
       break;
     case CMD_KD_D:
-      Kd -= 0.05;
+      Kd -= 0.005;
       Serial.print("Kd=");
       Serial.println(Kd, DEC);
       break;
     case CMD_KI_U:
-      Ki += 0.005;
+      Ki += 0.001;
       Serial.print("Ki=");
       Serial.println(Ki, DEC);
       break;
     case CMD_KI_D:
-      Ki -= 0.005;
+      Ki -= 0.001;
       Serial.print("Ki=");
       Serial.println(Ki, DEC);
       break;
@@ -380,18 +367,18 @@ void BT_Cmd(void)
       Serial.println(speed_need, DEC);
       break;
     case CMD_CAR_BK:
-      speed_need = (65 + car_speed_adjust) * -1;
+      speed_need = (50 + car_speed_adjust) * -1;
       dir_control = 0;
       Serial.print("BK=");
       Serial.println(speed_need, DEC);
       break;
     case CMD_CAR_LEFT:
-      turn_need = 120;
+      turn_need = 80;
       dir_control = 0;
       Serial.println("L");
       break;
     case CMD_CAR_RIGHT:
-      turn_need = -120;
+      turn_need = -80;
       dir_control = 0;
       Serial.println("R");
       break;
@@ -458,7 +445,7 @@ void Kalman_Filter(float Accel,float Gyro)
 
 	Angle	+= K_0 * Angle_err;	 //後驗估計
 	Q_bias	+= K_1 * Angle_err;	 //後驗估計
-	//Gyro_y   = Gyro - Q_bias;	 //輸出值(後驗估計)的微分=角速度
+	Gyro_y   = Gyro - Q_bias;	 //輸出值(後驗估計)的微分=角速度
 }
 
 //*********************************************************
@@ -533,17 +520,21 @@ void Angle_Calculate(void)
 
 
 //*********************************************************
-//電機編碼器計算
+//電機編碼器計算 & PWM output
 //*********************************************************
 void Position_Calculate(void)
 {
   speed_r_l =(speed_mr + speed_ml) * 0.5;
+  //car_speed *= 0.85;		                  //車輪速度濾波
+  //car_speed += speed_r_l * 0.15;
   car_speed *= 0.7;		                  //車輪速度濾波
   car_speed += speed_r_l * 0.3;
   car_position += car_speed;	                  //積分得到位移
   car_position += speed_need;
-  if(car_position < -2500) car_position = -2500;
-  if(car_position > 2500) car_position =  2500;
+  if (car_position < -3500) 
+    car_position = -3500;
+  if (car_position > 3500) 
+    car_position =  3500;
   
   if (cmd_sw_debug == 3)
   {
@@ -556,18 +547,10 @@ void Position_Calculate(void)
     Serial.print("\t");
     Serial.println(car_position);
   }
-}
 
-//*********************************************************
-//電機PWM值計算
-//*********************************************************
-//處理時間約90us；680us for Serial.print
-float Pt = 0, Et = 0, Et_last = 0, It = 0, It_last = 0, Dt = 0;
-//use compoment 
-void PWM_Calculate(void)
-{
+  // PWM Calculate
   /* angle PID calculation
-  // E(t) = R(t)–Y(t) // E(t) 設定與回授間的誤差， R(t) 設定點， Y(t) 回授測量結果
+  //E(t) = R(t)–Y(t) // E(t) 設定與回授間的誤差， R(t) 設定點， Y(t) 回授測量結果
   P(t) = Kp * E(t)
   I(t) = Ki * (I(t-1) + E(t))
   D(t) = Kd * (E(t) – E(t-1))
@@ -578,38 +561,37 @@ void PWM_Calculate(void)
   關鍵在 0 < Ki < 1 透過遞迴計算 (recursion)，
   Ki 越小，I(t)越快接近零。
   */
+/*  
   Et = Angle;
   Pt = Kp * Et;
   It = Ki * (It_last + Et);
   Dt = Kd * (Et - Et_last);
   Et_last = Et;
   It_last = It;
-  
   PWM_output  = Pt + It + Dt + Kpn * car_position + Ksp * car_speed;           
-  //PWM_output  = Pt + It + Dt;           
+*/  
+  PWM_output  = Kp * Angle + Kd * Gyro_y + Kpn * car_position + Ksp * car_speed;           
   PWM_L = PWM_output + turn_need;
   PWM_R = PWM_output - turn_need;
- 
+
   if (cmd_sw_debug == 2)
   {
     //Serial.print(Angle_ax, 3);
     //Serial.print("\t");
     Serial.print(Angle,1);
     Serial.print("\t");
-    Serial.print(Pt,3);
-    Serial.print("\t");
-    Serial.print(It,3);
-    Serial.print("\t");
-    Serial.print(Dt,3);
-    Serial.print("\t");
+    //Serial.print(Pt,3);
+    //Serial.print("\t");
+    //Serial.print(It,3);
+    //Serial.print("\t");
+    //Serial.print(Dt,3);
+    //Serial.print("\t");
     Serial.print(PWM_L,1);
     Serial.print("\t");
     Serial.println(PWM_R,1);
   }
-}
-
-void PWM_Output()
-{
+  
+  //PWM Output
   if (cmd_sw_motor)
   {  
     if(PWM_L > 1)//左电机-------或者取0
@@ -643,10 +625,9 @@ void PWM_Output()
       digitalWrite(TN3, HIGH);
       digitalWrite(TN4, HIGH);  
     }
-    //analogWrite(ENA,min(255,abs(PWM_L) + 25)); //PWM调速a==0-255
-    //analogWrite(ENB,min(255,abs(PWM_R) + 25));
-    PWM_L = min(255, (abs(PWM_L) + cmd_DZ_L));
-    PWM_R = min(255, (abs(PWM_R) + cmd_DZ_R));
+
+    PWM_L = min(250, (abs(PWM_L) + cmd_DZ_L));
+    PWM_R = min(250, (abs(PWM_R) + cmd_DZ_R));
     analogWrite(ENA, PWM_L);
     analogWrite(ENB, PWM_R);
   }
@@ -738,7 +719,7 @@ void loop() {
     }
     
     dir_control++;
-    if (dir_control > 1000)
+    if (dir_control > 1500)
     {
       dir_control = 0;
       speed_need = 0;
@@ -757,13 +738,6 @@ void loop() {
       //time = micros() - time;
       //Serial.print("Position_Calculate=");
       //Serial.println(time);
-      
-      //time = micros();
-      PWM_Calculate();
-      //time = micros() - time;
-      //Serial.print("PWM_Calculate=");
-      //Serial.println(time);
-      PWM_Output();
     }
     else
     {
