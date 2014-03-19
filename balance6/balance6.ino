@@ -195,10 +195,11 @@ void Balance_Car_Init(void)
 
     //*****設定delta, kalman濾波器採樣時間**********
     dt=0.006;              //0.006=6ms, dt為kalman濾波器採樣時間;
-    //dt=0.007;                //0.01=10ms, dt為kalman濾波器採樣時間;
-    //dt=0.05;               //0.05=50ms, dt為kalman濾波器採樣時間;
-    //task_dt = 7000;          //us, 1000000=1s, task_dt為主循環執行時間
     task_dt = 6000;          //us, 1000000=1s, task_dt為主循環執行時間
+    //dt=0.007;                //0.01=10ms, dt為kalman濾波器採樣時間;
+    //task_dt = 7000;          //us, 1000000=1s, task_dt為主循環執行時間
+    //dt=0.01;               //0.05=50ms, dt為kalman濾波器採樣時間;
+    //task_dt = 10000;          //us, 1000000=1s, task_dt為主循環執行時間
     
     //******校正Gyro零點偏移量************
     Accel_x_offset = 40;    //Regis, X軸加速度零點偏移
@@ -226,7 +227,7 @@ void Balance_Car_Init(void)
 
     //*****PWM**********
     cmd_DZ_L = 20;
-    cmd_DZ_R = 48;
+    cmd_DZ_R = 30;
     cmd_PWM_step = 0;
 }
 
@@ -580,14 +581,14 @@ void Position_Calculate(void)
     //Serial.print("\t");
     Serial.print(Angle,1);
     Serial.print("\t");
-    //Serial.print(Pt,3);
-    //Serial.print("\t");
+    Serial.print(Gyro_y,1);
+    Serial.print("\t");
     //Serial.print(It,3);
     //Serial.print("\t");
     //Serial.print(Dt,3);
     //Serial.print("\t");
-    Serial.print(PWM_L,1);
-    Serial.print("\t");
+    //Serial.print(PWM_L,1);
+    //Serial.print("\t");
     Serial.println(PWM_R,1);
   }
   
